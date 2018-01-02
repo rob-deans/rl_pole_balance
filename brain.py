@@ -11,14 +11,14 @@ class Model:
         self.input_states = tf.placeholder(np.float32, shape=[None, 4], name='input')
         self.input_actions = tf.placeholder(np.float32, shape=[None, 2], name='q_values_new')
         self.rewards = tf.placeholder(np.float32, shape=[None], name='rewards')
-        self.learning_rate = 1e-4
+        self.learning_rate = 1e-3
 
         net = self.input_states
         init = tf.truncated_normal_initializer()
 
-        net = tf.layers.dense(inputs=net, units=10, activation=tf.nn.relu, kernel_initializer=init, name='dense_1')
-        net = tf.layers.dense(inputs=net, units=20, activation=tf.nn.relu, kernel_initializer=init, name='dense_2')
-        net = tf.layers.dense(inputs=net, units=10, activation=tf.nn.relu, kernel_initializer=init, name='dense_3')
+        net = tf.layers.dense(inputs=net, units=100, activation=tf.nn.relu, kernel_initializer=init, name='dense_1')
+        net = tf.layers.dense(inputs=net, units=150, activation=tf.nn.relu, kernel_initializer=init, name='dense_2')
+        net = tf.layers.dense(inputs=net, units=100, activation=tf.nn.relu, kernel_initializer=init, name='dense_3')
         net = tf.layers.dense(inputs=net, units=2, kernel_initializer=init, activation=None, name='output')
 
         self.output = net
@@ -77,12 +77,13 @@ class ReplayMemory:
 class Agent:
 
     def __init__(self):
-        self.gamma = .97
-        self.max_episodes = 1000
+        self.gamma = 1
+        self.max_episodes = 400
         self.epsilon = 1.
-        self.final_epsilon = .1
+        self.final_epsilon = .05
+        self.epsilon_decay = 0.99
         self.model = Model()
-        self.memory = ReplayMemory(max_memory_size=10000, gamma=self.gamma, model=self.model)
+        self.memory = ReplayMemory(max_memory_size=5000, gamma=self.gamma, model=self.model)
         self.render = False  # Should make it faster
         self.counts = []
 
@@ -116,9 +117,8 @@ class Agent:
             print('TRAIN: The episode ' + str(i_episode) + ' lasted for ' + str(count) + ' timesteps with epsilon ' + str(self.epsilon))
             self.counts.append(count)
 
-            if i_episode % 100 == 0 and i_episode > 1:  # TODO: epsilon annealing?
-                if self.epsilon > self.final_epsilon:
-                    self.epsilon -= self.final_epsilon
+            if self.epsilon > self.final_epsilon:
+                self.epsilon = self.epsilon * self.epsilon_decay
 
         plt.plot(self.counts)
         plt.show()
