@@ -53,25 +53,12 @@ class PolicyModel:
         self.rewards = tf.placeholder(np.float32, shape=[None], name='rewards')
         self.learning_rate = 1e-1
 
-        net = self.input_states
-        init = tf.random_normal_initializer(stddev=0.01)
-
-        # hidden = tf.layers.dense(inputs=self.input_states, units=36, activation=tf.nn.relu, kernel_initializer=init, name='dense_1')
-        # net = tf.layers.dense(inputs=hidden, units=36, activation=tf.nn.relu, kernel_initializer=init, name='dense_2')
-        # logits = tf.layers.dense(inputs=hidden, units=2, activation=None, name='output')
         hidden1 = tf.contrib.layers.fully_connected(
             inputs=self.input_states,
             num_outputs=36,
             activation_fn=tf.nn.relu,
-            weights_initializer=tf.random_normal_initializer(stddev=1)
+            weights_initializer=tf.random_normal_initializer
         )
-        # hidden2 = tf.contrib.layers.fully_connected(
-        #     inputs=hidden1,
-        #     num_outputs=36,
-        #     activation_fn=tf.nn.relu,
-        #     weights_initializer=tf.random_normal_initializer
-        # )
-
         logits = tf.contrib.layers.fully_connected(
             inputs=hidden1,
             num_outputs=2,
@@ -202,16 +189,6 @@ class Agent:
 
             print('TRAIN: The episode ' + str(episode) + ' lasted for ' + str(count) + ' time steps')
             self.counts.append(count)
-
-        # df = pd.Series(self.counts)
-        # ma_counts = df.rolling(window=10).mean()
-        # ma_counts = ma_counts.values
-        # cleaned_list = [x for x in ma_counts if str(x) != 'nan']
-        # cleaned_list = np.asarray(cleaned_list)
-        # # 300 represents number of points to make between T.min and T.max
-        # x_new = np.linspace(cleaned_list.min(), cleaned_list.max(), len(cleaned_list))
-        # episodes = np.arange(0, len(cleaned_list))
-        # power_smooth = spline(episodes, cleaned_list, x_new)
 
         plt.plot(total_rewards)
         plt.show()
