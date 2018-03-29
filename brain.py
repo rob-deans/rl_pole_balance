@@ -94,6 +94,114 @@ class PolicyModel:
         self.session.run(self._train, feed_dict)
 
 
+class ActorCriticModel:
+    def __init__(self, memory, env):
+        # General
+        self.memory = memory
+        self.discount_factor = 0.99
+
+        # Environment
+        self.state_space = env.observation_space.shape[0]
+        self.action_space = env.action_space.n
+        self.value_size = 1
+
+        self.actor_lr = 1e-3
+        self.critic_lr = 5e-3
+
+        # ============================ #
+        #            Actor             #
+        # ============================ #
+        self.actor_input_state = tf.placeholder(tf.float32, shape=[None, self.state_space], name='actor_i_state')
+        self.actor_input_action = tf.placeholder(tf.float32, shape=[None, self.action_space], name='actor_i_act')
+        self.actor_td_error = tf.placeholder(tf.float32, shape=[None, 1], name='td_placeholder')
+
+        # init = tf.truncated_normal_initializer(0, 0.01)
+        init = tf.uniform_unit_scaling_initializer
+
+        net = tf.layers.dense(inputs=self.actor_input_state, units=36, activation=tf.nn.relu, kernel_initializer=init, name='dense_1')
+        self.actor_output = tf.layers.dense(inputs=net, units=self.action_space, kernel_initializer=init, activation=tf.nn.softmax, name='output')
+
+        # Categorical cross entropy
+        loss = tf.log(tf.reduce_sum(tf.multiply(self.actor_input_action, self.actor_output))) * self.actor_td_error
+        self.actor_optimise = tf.train.AdamOptimizer(self.actor_lr).minimize(-loss)
+
+        # ============================ #
+        #            Critic            #
+        # ============================ #
+
+        self.critic_input_state = tf.placeholder(tf.float32, shape=[None, self.state_space])
+        self.critic_td_target = tf.placeholder(tf.float32, shape=[None, 1], name='critic_td')
+
+        critic_net = self.critic_input_state
+
+        critic_net = tf.layers.dense(inputs=critic_net, units=100, activation=tf.nn.relu, kernel_initializer=init)
+        critic_net = tf.layers.dense(inputs=critic_net, units=150, activation=tf.nn.relu, kernel_initializer=init)
+        critic_net = tf.layers.dense(inputs=critic_net, units=100, activation=tf.nn.relu, kernel_initializer=init)
+
+        self.critic_output = tf.layers.dense(inputs=critic_net, units=self.value_size, activation=None, kernel_initializer=init)
+
+        self.critic_loss = tf.reduce_mean(tf.squared_difference(self.critic_td_target, self.critic_output))
+        self.critic_optimise = tf.train.AdamOptimizer(self.critic_lr).minimize(self.critic_loss)
+
+        # Tensorflow session init
+        self.session = tf.Session()
+        self.session.run(tf.global_variables_initializer())
+
+    def run(self, state):
+        actions = self.session.run(self.actor_output, feed_dict={self.actor_input_state: [state]})[0]
+        return np.random.choice(self.action_space, 1, p=actions)[0]
+
+    def predict(self, state):
+        return self.session.run(self.critic_output, feed_dict={self.critic_input_state: [state]})[0]
+
+    def batch_predict(self, states):
+        return self.session.run(self.critic_output, feed_dict={self.critic_input_state: states})
+
+    def train(self):
+        if len(self.memory.mem) < self.memory.batch_size:
+            return
+        samples = self.memory.get()
+
+        td_targets = []
+        td_errors = []
+
+        states = [sample[0] for sample in samples]
+        actions = [sample[1] for sample in samples]
+        rewards = [sample[2] for sample in samples]
+        done = [sample[3] for sample in samples]
+        next_states = [sample[4] for sample in samples]
+
+        values = self.batch_predict(states)
+        value_primes = self.batch_predict(next_states)
+
+        for i in range(self.memory.batch_size):
+            if done[i]:
+                td_targets.append([rewards[i]])
+            else:
+                td_targets.append(rewards[i] + self.discount_factor * value_primes[i])
+
+            td_errors.append(td_targets[-1] - values[i])
+
+        self.session.run(self.critic_optimise, feed_dict={self.critic_input_state: states,
+                                                          self.critic_td_target: td_targets})
+
+        self.session.run(self.actor_optimise, feed_dict={self.actor_input_state: states,
+                                                         self.actor_input_action: actions,
+                                                         self.actor_td_error: td_errors})
+
+
+class Memory:
+    def __init__(self):
+        self.mem = deque(maxlen=2000)
+        self.batch_size = 32
+
+    def add(self, state, action, reward, done, next_state):
+        self.mem.append([state, action, reward, done, next_state])
+
+    def get(self):
+        return random.sample(self.mem, self.batch_size)
+
+
 class ReplayMemory:
     def __init__(self, max_memory_size, gamma, model):
         self.states = deque(maxlen=max_memory_size)
@@ -127,12 +235,12 @@ class ReplayMemory:
 class Agent:
 
     def __init__(self):
+        self.max_episodes = 1000
         self.gamma = 0.99
-        self.max_episodes = 400
-        self.model = PolicyModel()
-        self.render = False  # Should make it faster
+        self.env = gym.make('CartPole-v0')
+        self.model = ActorCriticModel(Memory(), env=self.env)
+        self.render = False
         self.counts = []
-        self.batches = 10
 
     def discount_rewards(self, r):
         """ take 1D float array of rewards and compute discounted reward """
@@ -151,46 +259,33 @@ class Agent:
         return [len(rews)] * len(rews)
 
     def run(self):
-        env = gym.make('CartPole-v0')
-        b_obs, b_acts, b_rews = [], [], []
-        total_rewards = []
         for episode in range(self.max_episodes):
-            current_state = env.reset()
+            current_state = self.env.reset()
             done = False
             count = 0
-            obs, acts, rews = [], [], []
             while not done:
 
                 if self.render:
-                    env.render()
+                    self.env.render()
 
                 action = self.model.run(current_state)
 
-                next_state, reward, done, _ = env.step(action)  # observe the results from the action
+                next_state, reward, done, _ = self.env.step(action)  # observe the results from the action
                 count += reward
-                obs.append(current_state)
-                acts.append(action)
-                rews.append(reward)
 
+                # if done or count == 200:
+                #     reward = -100
+                actions = np.zeros(self.model.action_space)
+                actions[action] = 1
+                self.model.memory.add(current_state, actions, reward, done, next_state)
+
+                self.model.train()
                 current_state = next_state
-
-            total_rewards.append(len(rews))
-            b_obs.extend(obs)
-            b_acts.extend(acts)
-            advantages = self.process_rewards(rews)
-            b_rews.extend(advantages)
-
-            if episode % self.batches == 0 and episode > 0:
-                print('== TRAINING ==')
-                # train
-                b_rews = (b_rews - np.mean(b_rews)) // (np.std(b_rews) + 1e-10)
-                self.model.train(b_obs, b_acts, b_rews)
-                b_obs, b_acts, b_rews = [], [], []
 
             print('TRAIN: The episode ' + str(episode) + ' lasted for ' + str(count) + ' time steps')
             self.counts.append(count)
 
-        plt.plot(total_rewards)
+        plt.plot(self.counts)
         plt.show()
 
 
