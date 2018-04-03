@@ -273,8 +273,8 @@ class Agent:
                 next_state, reward, done, _ = self.env.step(action)  # observe the results from the action
                 count += reward
 
-                # if done or count == 200:
-                #     reward = -100
+                if done and count < 200:
+                    reward = -100
                 actions = np.zeros(self.model.action_space)
                 actions[action] = 1
                 self.model.memory.add(current_state, actions, reward, done, next_state)
